@@ -13,7 +13,8 @@
     BOOL userNotificationContentImagePropertyAvailable;
     
     SpotifyApplication *spotify;
-    
+    NSString *accessToken;
+
     SpotifyTrack *currentTrack;
     SpotifyTrack *previousTrack;
 }

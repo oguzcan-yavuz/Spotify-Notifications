@@ -6,7 +6,7 @@
 #import <ScriptingBridge/ScriptingBridge.h>
 
 
-@class SpotifyApplication, SpotifyTrack, SpotifyApplication;
+@class SpotifyApplication, SpotifyTrack, SpotifyTrackAudioFeatures, SpotifyApplication;
 
 enum SpotifyEPlS {
     SpotifyEPlSStopped = 'kPSS',
@@ -63,6 +63,30 @@ typedef enum SpotifyEPlS SpotifyEPlS;
 
 @end
 
+// Track audio features
+@interface SpotifyTrackAudioFeatures : SBObject
+
+@property (copy, readonly) NSString *type;
+@property (copy, readonly) NSString *id;
+@property (copy, readonly) NSString *uri;
+@property (copy, readonly) NSString *track_href;
+@property (copy, readonly) NSString *analysis_url;
+@property (readonly) NSInteger key;
+@property (readonly) NSInteger mode;
+@property (readonly) NSInteger time_signature;
+@property (readonly) NSNumber *duration_ms;
+@property (readonly) NSNumber *danceability;
+@property (readonly) NSNumber *energy;
+@property (readonly) NSNumber *loudness;
+@property (readonly) NSNumber *speechiness;
+@property (readonly) NSNumber *acousticness;
+@property (readonly) NSNumber *instrumentalness;
+@property (readonly) NSNumber *liveness;
+@property (readonly) NSNumber *valence;
+@property (readonly) NSNumber *tempo;
+
+
+@end
 
 
 /*

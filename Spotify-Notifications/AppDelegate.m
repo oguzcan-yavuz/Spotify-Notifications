@@ -17,6 +17,8 @@
     [NSUserDefaults.standardUserDefaults registerDefaults:[NSDictionary dictionaryWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"UserDefaults" ofType:@"plist"]]];
     
     spotify =  [SBApplication applicationWithBundleIdentifier:SpotifyBundleID];
+    
+    accessToken = @"";
 
     [NSUserNotificationCenter.defaultUserNotificationCenter setDelegate:self];
     
@@ -124,17 +126,140 @@
     return  nil;
 }
 
+- (NSString*)formatDuration:(NSNumber*)duration {
+    int seconds = duration.intValue;
+    int m = (seconds / 60) % 60;
+    int s = seconds % 60;
+    
+    return [NSString stringWithFormat:@"%02u:%02u", m, s];
+}
+
+- (NSString*)formatFloatsWithPercentage:(NSNumber*)n {
+    double nDouble = [n doubleValue] * 100;
+    NSNumberFormatter *formatter = [[NSNumberFormatter alloc] init];
+    formatter.numberStyle = NSNumberFormatterDecimalStyle;
+    formatter.maximumFractionDigits = 2;
+    formatter.roundingMode = NSNumberFormatterRoundUp;
+    
+    NSString *nFormatted = [formatter stringFromNumber:[NSNumber numberWithDouble:nDouble]];
+    return [NSString stringWithFormat:@"%%%@", nFormatted];
+}
+
+- (NSString*)generateBasicAuthHeader {
+    NSString *auth = [NSString stringWithFormat:@"%@:%@", SpotifyClientId, SpotifySecretKey];
+    NSData *nsdata = [auth dataUsingEncoding:NSUTF8StringEncoding];
+    
+    return [NSString stringWithFormat:@"%@ %@", @"Basic", [nsdata base64EncodedStringWithOptions:0]];
+}
+
+- (NSString*)generateBearerAuthHeader {
+    return [NSString stringWithFormat:@"%@ %@", @"Bearer", accessToken];
+}
+
+- (NSString*)getAccessTokenFromSpotifyAPI {
+    NSString *spotifyAccountsServiceURL = @"https://accounts.spotify.com/api/token";
+    NSString *authHeader = [self generateBasicAuthHeader];
+    NSString *post = @"grant_type=client_credentials";
+    NSData *postData = [post dataUsingEncoding:NSASCIIStringEncoding allowLossyConversion:YES];
+    NSString *postLength = [NSString stringWithFormat:@"%lu", (unsigned long)[postData length]];
+    NSMutableURLRequest *request = [[NSMutableURLRequest alloc] init];
+    [request setURL:[NSURL URLWithString:spotifyAccountsServiceURL]];
+    [request setHTTPMethod:@"POST"];
+    [request setValue:postLength forHTTPHeaderField:@"Content-Length"];
+    [request setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
+    [request setValue:authHeader forHTTPHeaderField:@"Authorization"];
+    [request setHTTPBody:postData];
+    NSError *error;
+    NSURLResponse *response;
+    NSData *urlData=[NSURLConnection sendSynchronousRequest:request returningResponse:&response error:&error];
+    NSObject *res = [NSJSONSerialization JSONObjectWithData:urlData options:0 error:&error];
+    
+    return [res valueForKey:@"access_token"];
+}
+
+- (SpotifyTrackAudioFeatures*)getAudioFeaturesFromSpotifyAPI:(NSString*)trackId {
+    // get an access token if it is empty
+    if([accessToken length] == 0) accessToken = [self getAccessTokenFromSpotifyAPI];
+    
+    NSString *spotifyAPIURL = @"https://api.spotify.com/v1/audio-features";
+    NSString *requestURL = [NSString stringWithFormat:@"%@/%@", spotifyAPIURL, trackId];
+    NSString *authHeader = [self generateBearerAuthHeader];
+    NSMutableURLRequest *request = [[NSMutableURLRequest alloc] init];
+    [request setURL:[NSURL URLWithString:requestURL]];
+    [request setValue:authHeader forHTTPHeaderField:@"Authorization"];
+    NSError *error;
+    NSURLResponse *response;
+    NSData *urlData=[NSURLConnection sendSynchronousRequest:request returningResponse:&response error:&error];
+    NSObject *res = [NSJSONSerialization JSONObjectWithData:urlData options:0 error:&error];
+    // handle token expiration
+    if([[res valueForKey:@"error"] isEqualToString:@"invalid_client"]) {
+        accessToken = [self getAccessTokenFromSpotifyAPI];
+        [self getAudioFeaturesFromSpotifyAPI:trackId];
+    }
+    
+    return (SpotifyTrackAudioFeatures*) res;
+}
+
+- (NSString*)formatInformativeTextWithAudioFeatures:(NSString*)artist :(SpotifyTrackAudioFeatures*)audioFeatures {
+    NSDictionary *constants = @{
+                                @"mode": @{
+                                        @"0": @"Minor",
+                                        @"1": @"Major"
+                                        },
+                                @"key": @{
+                                        @"-1": @"Unknown",
+                                        @"0": @"C",
+                                        @"1": @"C♯/D♭",
+                                        @"2": @"D",
+                                        @"3": @"D♯/E♭",
+                                        @"4": @"E",
+                                        @"5": @"F",
+                                        @"6": @"F♯/G♭",
+                                        @"7": @"G",
+                                        @"8": @"G♯/A♭",
+                                        @"9": @"A",
+                                        @"10": @"A♯/B♭",
+                                        @"11": @"B"
+                                        },
+                                };
+    NSString *key = [NSString stringWithFormat: @"%@", [audioFeatures valueForKey:@"key"]];
+    NSString *mode = [NSString stringWithFormat: @"%@", [audioFeatures valueForKey:@"mode"]];
+    NSString *text = [NSString stringWithFormat:
+                      @"%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t",
+                      @"Artist", artist,
+                      @"Duration", [self formatDuration:[audioFeatures valueForKey:@"duration_ms"]],
+                      @"Tempo", [audioFeatures valueForKey:@"tempo"],
+                      @"Key", [[constants valueForKey:@"key"] valueForKey:key],
+                      @"Mode", [[constants valueForKey:@"mode"] valueForKey:mode],
+                      @"Time Signature", [audioFeatures valueForKey:@"time_signature"],
+                      @"Instrumentalness", [self formatFloatsWithPercentage:[audioFeatures valueForKey:@"instrumentalness"]],
+                      @"Speechiness", [self formatFloatsWithPercentage:[audioFeatures valueForKey:@"speechiness"]],
+                      @"Acousticness", [self formatFloatsWithPercentage:[audioFeatures valueForKey:@"acousticness"]],
+                      @"Valence", [self formatFloatsWithPercentage:[audioFeatures valueForKey:@"valence"]],
+                      @"Energy", [self formatFloatsWithPercentage:[audioFeatures valueForKey:@"energy"]],
+                      @"Danceability", [self formatFloatsWithPercentage:[audioFeatures valueForKey:@"danceability"]],
+                      @"Liveness", [self formatFloatsWithPercentage:[audioFeatures valueForKey:@"liveness"]],
+                      @"Loudness", [audioFeatures valueForKey:@"loudness"]
+                      ];
+    return text;
+}
+
 - (NSUserNotification*)userNotificationForCurrentTrack {
     NSString *title = currentTrack.name;
     NSString *album = currentTrack.album;
     NSString *artist = currentTrack.artist;
+    NSString *id = currentTrack.id;
     
     BOOL isAdvert = [currentTrack.spotifyUrl hasPrefix:@"spotify:ad"];
     
+    // TODO: create a custom notification UI and show it instead of NSUserNotification
     NSUserNotification *notification = [NSUserNotification new];
     notification.title = (title.length > 0 && !isAdvert)? title : @"No Song Playing";
     if (album.length > 0 && !isAdvert) notification.subtitle = album;
-    if (artist.length > 0 && !isAdvert) notification.informativeText = artist;
+    if (artist.length > 0 && !isAdvert) {
+        SpotifyTrackAudioFeatures *audioFeatures = [self getAudioFeaturesFromSpotifyAPI:id];
+        notification.informativeText = [self formatInformativeTextWithAudioFeatures:artist :audioFeatures];
+    }
     
     BOOL includeAlbumArt = (userNotificationContentImagePropertyAvailable &&
                            [NSUserDefaults.standardUserDefaults boolForKey:kNotificationIncludeAlbumArtKey]
@@ -148,7 +273,7 @@
         
         notification.hasActionButton = YES;
         notification.actionButtonTitle = @"Skip";
-        
+
         
         //Private APIs – remove if publishing to Mac App Store
         @try {
@@ -165,6 +290,8 @@
         } @catch (NSException *exception) {}
     }
     
+    NSNumber *n = [NSNumber numberWithInt:2];
+    [notification setValue:n forKey:@"_style"];
     return notification;
 }
 
