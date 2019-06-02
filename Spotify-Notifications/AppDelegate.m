@@ -205,7 +205,7 @@
     // handle token expiration
     if([[res valueForKey:@"error"] isEqualToString:@"invalid_client"]) {
         accessToken = [self getAccessTokenFromSpotifyAPI];
-        [self getAudioFeaturesFromSpotifyAPI:trackId];
+        return [self getAudioFeaturesFromSpotifyAPI:trackId];
     }
     
     return (SpotifyTrackAudioFeatures*) res;
