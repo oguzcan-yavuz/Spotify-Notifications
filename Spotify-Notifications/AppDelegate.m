@@ -127,21 +127,28 @@
 }
 
 - (NSString*)formatDuration:(NSNumber*)duration {
-    int seconds = duration.intValue;
+    int ms = duration.intValue;
+    int seconds = roundf(ms / 1000);
     int m = (seconds / 60) % 60;
     int s = seconds % 60;
     
     return [NSString stringWithFormat:@"%02u:%02u", m, s];
 }
 
-- (NSString*)formatFloatsWithPercentage:(NSNumber*)n {
-    double nDouble = [n doubleValue] * 100;
+- (NSString*)limitMaxFraction:(NSNumber*)n :(int)limit {
+    double nDouble = [n doubleValue];
     NSNumberFormatter *formatter = [[NSNumberFormatter alloc] init];
     formatter.numberStyle = NSNumberFormatterDecimalStyle;
-    formatter.maximumFractionDigits = 2;
-    formatter.roundingMode = NSNumberFormatterRoundUp;
+    formatter.maximumFractionDigits = limit;
     
-    NSString *nFormatted = [formatter stringFromNumber:[NSNumber numberWithDouble:nDouble]];
+    return [formatter stringFromNumber:[NSNumber numberWithDouble:nDouble]];
+}
+
+- (NSString*)formatFloatsWithPercentage:(NSNumber*)n {
+    double nWithPercentage = [n doubleValue] * 100;
+    NSNumber *nNumber = [NSNumber numberWithDouble:nWithPercentage];
+    NSString *nFormatted = [self limitMaxFraction :nNumber :2];
+    
     return [NSString stringWithFormat:@"%%%@", nFormatted];
 }
 
@@ -154,6 +161,10 @@
 
 - (NSString*)generateBearerAuthHeader {
     return [NSString stringWithFormat:@"%@ %@", @"Bearer", accessToken];
+}
+
+- (NSString*)getTrackId:(NSString*)spotifyTrackId {
+    return [[spotifyTrackId componentsSeparatedByString:@":"] lastObject];
 }
 
 - (NSString*)getAccessTokenFromSpotifyAPI {
@@ -180,7 +191,7 @@
 - (SpotifyTrackAudioFeatures*)getAudioFeaturesFromSpotifyAPI:(NSString*)trackId {
     // get an access token if it is empty
     if([accessToken length] == 0) accessToken = [self getAccessTokenFromSpotifyAPI];
-    
+
     NSString *spotifyAPIURL = @"https://api.spotify.com/v1/audio-features";
     NSString *requestURL = [NSString stringWithFormat:@"%@/%@", spotifyAPIURL, trackId];
     NSString *authHeader = [self generateBearerAuthHeader];
@@ -200,7 +211,7 @@
     return (SpotifyTrackAudioFeatures*) res;
 }
 
-- (NSString*)formatInformativeTextWithAudioFeatures:(NSString*)artist :(SpotifyTrackAudioFeatures*)audioFeatures {
+- (NSString*)formatInformativeTextWithAudioFeatures:(SpotifyTrackAudioFeatures*)audioFeatures {
     NSDictionary *constants = @{
                                 @"mode": @{
                                         @"0": @"Minor",
@@ -225,10 +236,9 @@
     NSString *key = [NSString stringWithFormat: @"%@", [audioFeatures valueForKey:@"key"]];
     NSString *mode = [NSString stringWithFormat: @"%@", [audioFeatures valueForKey:@"mode"]];
     NSString *text = [NSString stringWithFormat:
-                      @"%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t",
-                      @"Artist", artist,
+                      @"%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t%@: %@\t",
                       @"Duration", [self formatDuration:[audioFeatures valueForKey:@"duration_ms"]],
-                      @"Tempo", [audioFeatures valueForKey:@"tempo"],
+                      @"Tempo", [self limitMaxFraction:[audioFeatures valueForKey:@"tempo"] :0],
                       @"Key", [[constants valueForKey:@"key"] valueForKey:key],
                       @"Mode", [[constants valueForKey:@"mode"] valueForKey:mode],
                       @"Time Signature", [audioFeatures valueForKey:@"time_signature"],
@@ -239,7 +249,7 @@
                       @"Energy", [self formatFloatsWithPercentage:[audioFeatures valueForKey:@"energy"]],
                       @"Danceability", [self formatFloatsWithPercentage:[audioFeatures valueForKey:@"danceability"]],
                       @"Liveness", [self formatFloatsWithPercentage:[audioFeatures valueForKey:@"liveness"]],
-                      @"Loudness", [audioFeatures valueForKey:@"loudness"]
+                      @"Loudness", [self limitMaxFraction:[audioFeatures valueForKey:@"loudness"] :2]
                       ];
     return text;
 }
@@ -248,17 +258,17 @@
     NSString *title = currentTrack.name;
     NSString *album = currentTrack.album;
     NSString *artist = currentTrack.artist;
-    NSString *id = currentTrack.id;
+    NSString *trackId = [self getTrackId:currentTrack.id];
     
     BOOL isAdvert = [currentTrack.spotifyUrl hasPrefix:@"spotify:ad"];
     
     // TODO: create a custom notification UI and show it instead of NSUserNotification
     NSUserNotification *notification = [NSUserNotification new];
     notification.title = (title.length > 0 && !isAdvert)? title : @"No Song Playing";
-    if (album.length > 0 && !isAdvert) notification.subtitle = album;
+    if (album.length > 0 && !isAdvert) notification.subtitle = [NSString stringWithFormat: @"Album: %@\tArtist: %@\t", album, artist];
     if (artist.length > 0 && !isAdvert) {
-        SpotifyTrackAudioFeatures *audioFeatures = [self getAudioFeaturesFromSpotifyAPI:id];
-        notification.informativeText = [self formatInformativeTextWithAudioFeatures:artist :audioFeatures];
+        SpotifyTrackAudioFeatures *audioFeatures = [self getAudioFeaturesFromSpotifyAPI:trackId];
+        notification.informativeText = [self formatInformativeTextWithAudioFeatures:audioFeatures];
     }
     
     BOOL includeAlbumArt = (userNotificationContentImagePropertyAvailable &&
